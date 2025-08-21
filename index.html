@@ -8,7 +8,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <!-- JSZip + FileSaver for zip export -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 </head>
@@ -19,7 +18,7 @@
         <div class="logo">🔮</div>
         <div>
           <h1>Spellcast Datapack Generator</h1>
-          <div class="muted" style="font-size:12px">XY offset grid + path preview</div>
+          <div class="muted" style="font-size:12px">XY offset grid + path & raycasting</div>
         </div>
       </div>
 
@@ -76,7 +75,6 @@
               <button class="btn small" id="resetOffset">Reset</button>
             </div>
             <div class="offset-grid-wrap">
-              <!-- XY editor grid -->
               <div id="gridCanvas" class="grid-canvas" aria-label="6 by 6 XY grid">
                 <div class="grid-cross-v"></div>
                 <div class="grid-cross-h"></div>
@@ -110,7 +108,6 @@
             <h2>Path Preview (All Points)</h2>
           </div>
           <div class="offset-grid-wrap">
-            <!-- Overview grid with SVG overlay for lines & nodes -->
             <div id="overviewCanvas" class="grid-canvas" aria-label="All points XY path">
               <div class="grid-cross-v"></div>
               <div class="grid-cross-h"></div>
@@ -123,16 +120,22 @@
             <h2>After-cast Function (activate/<span id="loadedSpellLabel">incendio</span>.mcfunction)</h2>
           </div>
           <div class="field">
-            <textarea id="afterFunction" rows="8" spellcheck="false" placeholder="$say Spell finished!
-$particle flame ~ ~ ~ 0 0 0 0.01 50
-# Add any commands you want here..."></textarea>
+            <textarea id="afterFunction" rows="6" spellcheck="false" placeholder="$say Spell finished!
+$particle flame ~ ~ ~ 0 0 0 0.01 50"></textarea>
           </div>
+
+          <!-- Raycasting UI -->
+          <div class="section-title" style="margin-top:18px">
+            <h2>Raycasting</h2>
+            <button class="btn small success" id="addRayBtn">+ ADD Raycast</button>
+          </div>
+          <div id="raysContainer" class="rays"></div>
+
         </div>
       </div>
     </main>
   </div>
 
-  <!-- Load after DOM so elements exist -->
   <script src="script.js"></script>
 </body>
 </html>
