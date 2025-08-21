@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spellcast Datapack Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <!-- JSZip + FileSaver for zip export -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="brand">
+        <div class="logo">🔮</div>
+        <div>
+          <h1>Spellcast Datapack Generator</h1>
+          <div class="muted" style="font-size:12px">XY offset grid + path preview</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Spell name</label>
+        <input id="spellName" type="text" placeholder="e.g. incendio" />
+      </div>
+
+      <div class="field">
+        <label>Spell Settings</label>
+        <div class="settings">
+          <div class="setting">
+            <span class="setting-label">Delay</span>
+            <input id="spellDelay" type="number" min="0" step="1" value="50" />
+          </div>
+          <div class="setting">
+            <span class="setting-label">After-complete (loaded_spell)</span>
+            <input id="loadedSpell" type="text" value="incendio" />
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">
+        <h2>Points</h2>
+        <button class="btn small" id="addPointBtn">+ Add Point</button>
+      </div>
+
+      <div id="pointsList" class="points-list"></div>
+
+      <div class="actions">
+        <button id="exportZip" class="btn primary">⬇ Download .zip</button>
+        <button id="exportJson" class="btn">⤓ Export JSON</button>
+        <label class="btn ghost" for="importJson">⤒ Import JSON</label>
+        <input id="importJson" type="file" accept="application/json" style="display:none" />
+      </div>
+
+      <div style="margin-top:14px" class="muted" id="status"></div>
+    </aside>
+
+    <main>
+      <div class="section-title">
+        <h2>Editor</h2>
+        <span class="pill" id="selectedLabel">Point 0</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="field">
+            <label>Offset (x, y, z)</label>
+            <div class="offsets">
+              <input id="offsetX" type="number" step="any" inputmode="decimal" placeholder="x">
+              <input id="offsetY" type="number" step="any" inputmode="decimal" placeholder="y">
+              <input id="offsetZ" type="number" step="any" inputmode="decimal" placeholder="z">
+              <button class="btn small" id="resetOffset">Reset</button>
+            </div>
+            <div class="offset-grid-wrap">
+              <!-- XY editor grid -->
+              <div id="gridCanvas" class="grid-canvas" aria-label="6 by 6 XY grid">
+                <div class="grid-cross-v"></div>
+                <div class="grid-cross-h"></div>
+                <div id="gridThumb" class="grid-thumb" title="Drag to set X/Y"></div>
+              </div>
+              <div class="muted tiny">Drag/click to set X (→) and Y (↑). 6×6 cells, origin at crosshair. Z is separate.</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Commands for this point</label>
+          </div>
+          <div id="commands"></div>
+          <div class="footer">
+            <button class="btn" id="addCmdBtn">+ Add Command</button>
+            <button class="btn" id="clearPointBtn">Clear Point</button>
+            <button class="btn danger" id="deletePointBtn">Delete Point</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">
+            <h2>Live Preview</h2>
+            <div class="actions">
+              <button class="btn small" id="copyPreview">Copy file</button>
+            </div>
+          </div>
+          <div id="preview" class="preview"></div>
+
+          <div class="section-title" style="margin-top:18px">
+            <h2>Path Preview (All Points)</h2>
+          </div>
+          <div class="offset-grid-wrap">
+            <!-- Overview grid with SVG overlay for lines & nodes -->
+            <div id="overviewCanvas" class="grid-canvas" aria-label="All points XY path">
+              <div class="grid-cross-v"></div>
+              <div class="grid-cross-h"></div>
+              <svg id="overviewSvg" width="180" height="180" viewBox="0 0 180 180" class="overlay-svg"></svg>
+            </div>
+            <div class="muted tiny">All points in order on X/Y. Lines connect steps; circles have the point index.</div>
+          </div>
+
+          <div class="section-title" style="margin-top:18px">
+            <h2>After-cast Function (activate/<span id="loadedSpellLabel">incendio</span>.mcfunction)</h2>
+          </div>
+          <div class="field">
+            <textarea id="afterFunction" rows="8" spellcheck="false" placeholder="$say Spell finished!
+$particle flame ~ ~ ~ 0 0 0 0.01 50
+# Add any commands you want here..."></textarea>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Load after DOM so elements exist -->
+  <script src="script.js"></script>
+</body>
+</html>
