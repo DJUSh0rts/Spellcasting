@@ -2,9 +2,8 @@
   // ---------- State ----------
   const state = {
     spellName: '',
-    settings: { delay: 50, loadedSpell: 'incendio' },
+    settings: { delay: 50, loadedSpell: 'incendio' }, // kept for UI, but finish-cast uses spellName
     afterFunction: '',
-    // No default raycasts; user may add none
     rays: [],
     points: [ { commands: [], offset: {x:0,y:0,z:0} } ],
     selected: 0,
@@ -21,7 +20,6 @@
         { name:'small_flame', dx:0.1, dy:0.1, dz:0.1, speed:0, count:2 }
       ],
       blockChecks: [],
-      // supports macros in selector/command (e.g. $(UUID))
       entityChecks: [],
     };
   }
@@ -32,14 +30,14 @@
   const selectedLabelEl = $('#selectedLabel');
   const previewEl = $('#preview');
   const statusEl = $('#status');
-  const commandsEl = $('#commands');          // <— commands list container
+  const commandsEl = $('#commands');
 
   const nameInput = $('#spellName');
   const offX = $('#offsetX');
   const offY = $('#offsetY');
   const offZ = $('#offsetZ');
   const spellDelayEl  = $('#spellDelay');
-  const loadedSpellEl = $('#loadedSpell');
+  const loadedSpellEl = $('#loadedSpell');          // still editable, but not used for finish-cast routing
   const loadedSpellLabel = $('#loadedSpellLabel');
   const afterFunctionEl = $('#afterFunction');
 
@@ -128,7 +126,6 @@
     const p = state.points[state.selected];
     commandsEl.innerHTML = '';
 
-    // rows for each command
     p.commands.forEach((cmd, i)=>{
       const row = document.createElement('div');
       row.className = 'cmd-row';
@@ -139,13 +136,11 @@
       const ta = row.querySelector('.cmd-text');
       const del = row.querySelector('button');
 
-      // auto-grow textarea height
       const fit = ()=>{ ta.style.height='auto'; ta.style.height = (ta.scrollHeight)+'px'; };
       ta.addEventListener('input', ()=>{
         state.points[state.selected].commands[i] = ta.value;
         fit(); renderPreview(); save();
       });
-      // initial set & grow
       fit();
 
       del.addEventListener('click', ()=>{
@@ -164,7 +159,7 @@
     if(offY) offY.value = p.offset.y;
     if(offZ) offZ.value = p.offset.z;
     updateThumb();
-    renderCommands();    // <— ensure the commands UI is refreshed
+    renderCommands();
     renderOverview();
   }
 
@@ -186,7 +181,9 @@
       lines.push(`scoreboard players set @s spell_delay ${state.settings.delay}`);
       lines.push(``);
       lines.push(`# Set function to run after delay // add option to change on website // this is what happens after the spell is completed`);
-      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${state.settings.loadedSpell}`);
+      // IMPORTANT: set loaded_spell to the spell's own name so the correct activate function is called
+      const actName = safeName(state.spellName) || 'spell';
+      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${actName}`);
       lines.push(``);
       lines.push(`# Keep this exact formatting`);
       lines.push(`$kill @e[tag=spell_pos,nbt={data:{owner:$(UUID)}}]`);
@@ -422,19 +419,11 @@
     grid.addEventListener('pointerleave',()=>{ dragging=false; });
   }
 
-  // ---------- Overview path (path preview) ----------
+  // ---------- Overview path ----------
   function renderOverview(){
     if(!overviewSvg) return;
     const pts = state.points.map(p=>({ x: (p.offset.x*CELL)+SIZE/2, y: SIZE/2 - (p.offset.y*CELL) }));
     overviewSvg.innerHTML='';
-    // grid background (optional guide)
-    // draw lines between points
-    for(let i=0;i<pts.length-1;i++){
-      const a=pts[i], b=pts[i+1];
-      const line=document.createElementNS('http://www.w3.org/200/svg','line'); // typo-proof
-    }
-    // recreate properly
-    overviewSvg.innerHTML = '';
     for(let i=0;i<pts.length-1;i++){
       const a=pts[i], b=pts[i+1];
       const line=document.createElementNS('http://www.w3.org/2000/svg','line');
@@ -443,7 +432,6 @@
       line.setAttribute('stroke','#38bdf8'); line.setAttribute('stroke-width','2'); line.setAttribute('stroke-linecap','round');
       overviewSvg.appendChild(line);
     }
-    // points
     pts.forEach((p,idx)=>{
       const g=document.createElementNS('http://www.w3.org/2000/svg','g');
       const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
@@ -523,6 +511,18 @@
     }
   });
 
+  // After-cast function textarea (multi-line, macro-aware preview only saved in ZIP)
+  afterFunctionEl?.addEventListener('input', ()=>{
+    state.afterFunction = afterFunctionEl.value;
+    save();
+  });
+
+  loadedSpellEl?.addEventListener('input', ()=>{
+    state.settings.loadedSpell = loadedSpellEl.value.trim();
+    if(loadedSpellLabel) loadedSpellLabel.textContent = state.settings.loadedSpell || '';
+    save();
+  });
+
   // ---------- Export / Import ----------
   $('#exportJson')?.addEventListener('click',()=>{
     const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
@@ -560,7 +560,7 @@
 
     const zip = new JSZip();
 
-    // pack.mcmeta (exact content)
+    // pack.mcmeta
     const packMcmeta = `{
   "pack": {
     "pack_format": 81,
@@ -574,13 +574,13 @@
     zip.file("pack.mcmeta", packMcmeta + "\n");
 
     // structure
+    const spellId = safeName(state.spellName) || 'spell';
     const base = "data/spellcasting/function/spells/";
     const activateDir = zip.folder(base + "activate");
-    const patternsDir = zip.folder(base + "patterns/" + (state.spellName || "spell"));
-    const rayBase = base + (state.spellName || "spell") + "/";
+    const patternsDir = zip.folder(base + "patterns/" + spellId);
+    const rayBase = base + spellId + "/";
 
-    // activate content
-    const loaded = (state.settings.loadedSpell || "incendio").replace(/[^a-zA-Z0-9_\-]/g,'_');
+    // activate content — IMPORTANT: filename = spell name (so finish cast calls the right one)
     const actLines = [];
     state.rays.forEach((ray, i)=>{
       if(!ray.enabled) return;
@@ -588,26 +588,32 @@
       actLines.push(`# ${ray.name}`);
       actLines.push(`scoreboard players set @s spell_ray_steps ${Math.max(1, ray.maxSteps)}`);
       if(hasMacros){
-        actLines.push(`execute at @s anchored eyes run function spellcasting:spells/${(state.spellName||'spell')}/ray_tick_${i} with entity @s`);
+        actLines.push(`execute at @s anchored eyes run function spellcasting:spells/${spellId}/ray_tick_${i} with entity @s`);
       }else{
-        actLines.push(`execute at @s anchored eyes run function spellcasting:spells/${(state.spellName||'spell')}/ray_tick_${i}`);
+        actLines.push(`execute at @s anchored eyes run function spellcasting:spells/${spellId}/ray_tick_${i}`);
       }
       actLines.push('');
     });
-    const after = (state.afterFunction||'').trim();
-    if(after) actLines.push(after);
-    activateDir.file(`${loaded}.mcfunction`, actLines.join("\n") + (actLines.length? "\n" : ""));
+
+    // After-cast function (multi-line, macro-aware)
+    const afterLines = (state.afterFunction||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    afterLines.forEach(line=>{
+      const hasMacro = /\$\([A-Za-z0-9_]+\)/.test(line);
+      actLines.push(hasMacro ? `$${line}` : line);
+    });
+
+    activateDir.file(`${spellId}.mcfunction`, actLines.join("\n") + (actLines.length? "\n" : ""));
 
     // pattern point files
     for(let i=0;i<state.points.length;i++){
-      patternsDir.file(`${i}.mcfunction`, buildPointFile(i) + "\n");
+      patternsDir.file(`${i}.mcfunction`, buildPointFile(i, spellId) + "\n");
     }
 
     // rays
     const rayFolder = zip.folder(rayBase);
     state.rays.forEach((ray, i)=>{
       if(!ray.enabled) return;
-      rayFolder.file(`ray_tick_${i}.mcfunction`, buildRayFile(ray, i) + "\n");
+      rayFolder.file(`ray_tick_${i}.mcfunction`, buildRayFile(ray, i, spellId) + "\n");
     });
 
     const blob = await zip.generateAsync({type:'blob'});
@@ -618,7 +624,7 @@
   });
 
   // ---------- Builders ----------
-  function buildPointFile(i){
+  function buildPointFile(i, spellId){
     const p = state.points[i];
     const lines=[];
     if(i===0){
@@ -629,12 +635,12 @@
     if(i<state.points.length-1){
       lines.push(`$function spellcasting:spawn_spell_point {UUID:$(UUID),ox:${trimFloat(p.offset.x)},oy:${trimFloat(p.offset.y)},oz:${trimFloat(p.offset.z)}}`);
     } else {
-      // EXACT final point block
+      // Final point: ensure next phase calls the right activate file by name (spellId)
       lines.push(`# Set Spell Delay // add option to change on website`);
       lines.push(`scoreboard players set @s spell_delay ${state.settings.delay}`);
       lines.push(``);
-      lines.push(`# Set function to run after delay // add option to change on website // this is what happens after the spell is completed`);
-      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${state.settings.loadedSpell}`);
+      lines.push(`# Set function to run after delay // this is what happens after the spell is completed`);
+      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${spellId}`);
       lines.push(``);
       lines.push(`# Keep this exact formatting`);
       lines.push(`$kill @e[tag=spell_pos,nbt={data:{owner:$(UUID)}}]`);
@@ -646,35 +652,30 @@
     return lines.join('\n');
   }
 
-  function buildRayFile(ray, idx){
+  function buildRayFile(ray, idx, spellId){
     const out = [];
     const hasMacros = rayHasMacros(ray);
     const macroObj = hasMacros ? buildMacroObject(ray) : '';
 
     out.push(`# ${ray.name}`);
     out.push(`# Limiter (requires objective 'spell_ray_steps')`);
-    // your latest rule: return fail when out of steps
     out.push(`execute if score @s spell_ray_steps matches ..0 run return fail`);
     out.push(`scoreboard players remove @s spell_ray_steps 1`);
     out.push(``);
 
-    // particles
     ray.particles.forEach(p=>{
       out.push(`particle ${p.name||'small_flame'} ^ ^ ^ ${num(p.dx)} ${num(p.dy)} ${num(p.dz)} ${num(p.speed)} ${Math.max(0,Math.floor(p.count||0))}`);
     });
 
-    // block checks
     ray.blockChecks.forEach(b=>{
       if(!b.id || !b.cmd) return;
       if(b.pass){
         out.push(`execute unless block ^ ^ ^ ${b.id} run ${b.cmd}`);
       }else{
-        // keep your syntax: "run return ${cmd}"
         out.push(`execute unless block ^ ^ ^ ${b.id} run return ${b.cmd}`);
       }
     });
 
-    // entity checks (macro-aware prefix)
     ray.entityChecks.forEach(e=>{
       if(!e.selector || !e.cmd) return;
       const base = e.pass
@@ -687,8 +688,7 @@
       }
     });
 
-    // step forward (macro-aware recursive call)
-    const step = `execute positioned ^ ^ ^${num(ray.step)} run function spellcasting:spells/${(state.spellName||'spell')}/ray_tick_${idx}`;
+    const step = `execute positioned ^ ^ ^${num(ray.step)} run function spellcasting:spells/${spellId}/ray_tick_${idx}`;
     if(hasMacros){
       out.push(`$${step} ${macroObj}`);
     }else{
