@@ -1,113 +1,77 @@
 (function(){
-  // ---------- State ----------
+  // ---------- State (matches your new C# structure) ----------
   const state = {
     spellName: '',
-    settings: { delay: 50, loadedSpell: 'incendio' }, // kept for UI, but finish-cast uses spellName
-    afterFunction: '',
-    rays: [],
-    points: [ { commands: [], offset: {x:0,y:0,z:0} } ],
+    author: '',
+    spellDelay: 50,
+    points: [ mkPoint() ],
     selected: 0,
+    finishCommands: [],
+    raycasts: [], // { name, step, max_distance, commands[], block_checks[], entity_checks[], collapsed, enabled }
   };
 
+  function mkPoint(){ return { commands: [], offset: { x:0, y:0, z:0 } }; }
   function mkRay(name){
     return {
-      name,
-      enabled: false,
-      collapsed: false,
+      name: name || `Ray ${state.raycasts.length+1}`,
       step: 0.5,
-      maxSteps: 40,
-      particles: [
-        { name:'small_flame', dx:0.1, dy:0.1, dz:0.1, speed:0, count:2 }
-      ],
-      blockChecks: [],
-      entityChecks: [],
+      max_distance: 50,
+      commands: [],
+      block_checks: [], // [{id, cmd, pass, invert}]
+      entity_checks: [], // [{selector, cmd, pass, invert}]
+      collapsed: false,
+      enabled: true
     };
   }
 
   // ---------- DOM ----------
-  const $ = (s)=>document.querySelector(s);
+  const $ = s => document.querySelector(s);
   const pointsListEl = $('#pointsList');
   const selectedLabelEl = $('#selectedLabel');
-  const previewEl = $('#preview');
-  const statusEl = $('#status');
   const commandsEl = $('#commands');
+  const previewEl = $('#preview');
+  const overviewSvg = $('#overviewSvg');
+  const statusEl = $('#status');
 
-  const nameInput = $('#spellName');
-  const offX = $('#offsetX');
-  const offY = $('#offsetY');
-  const offZ = $('#offsetZ');
-  const spellDelayEl  = $('#spellDelay');
-  const loadedSpellEl = $('#loadedSpell');          // still editable, but not used for finish-cast routing
-  const loadedSpellLabel = $('#loadedSpellLabel');
+  const spellNameEl = $('#spellName');
+  const authorEl = $('#author');
+  const spellDelayEl = $('#spellDelay');
+
+  const offX = $('#offsetX'), offY = $('#offsetY'), offZ = $('#offsetZ');
+  const addPointBtn = $('#addPointBtn'), deletePointBtn = $('#deletePointBtn'), clearPointBtn = $('#clearPointBtn');
+  const addCmdBtn = $('#addCmdBtn'), resetOffsetBtn = $('#resetOffset');
+
+  const grid = document.getElementById('gridCanvas');
+  const thumb = document.getElementById('gridThumb');
+  const CELLS=3, SIZE=180, CELL=SIZE/CELLS, RANGE=CELLS/2; // 3×3
+
   const afterFunctionEl = $('#afterFunction');
-
-  const addPointBtn = $('#addPointBtn');
-  const addCmdBtn = $('#addCmdBtn');
-  const clearPointBtn = $('#clearPointBtn');
-  const deletePointBtn = $('#deletePointBtn');
-  const resetOffsetBtn = $('#resetOffset');
 
   const raysContainer = $('#raysContainer');
   const addRayBtn = $('#addRayBtn');
 
-  addRayBtn?.addEventListener('click', ()=>{
-    state.rays.push(mkRay(`Cast ${state.rays.length+1}`));
-    renderRays(); save();
-  });
-
-  [offX, offY, offZ].forEach(i=>{ if(i){ i.step='any'; i.inputMode='decimal'; } });
-
-  // ---------- Grids ----------
-  const grid = document.getElementById('gridCanvas');
-  const thumb = document.getElementById('gridThumb');
-  const overviewSvg = document.getElementById('overviewSvg');
-  const CELLS=6, SIZE=180, CELL=SIZE/CELLS, RANGE=CELLS/2;
-
   // ---------- Storage ----------
-  const save = ()=>{ try{ localStorage.setItem('spellcast_site_v2', JSON.stringify(state)); }catch{} };
-  const load = ()=>{ try{
-    const raw=localStorage.getItem('spellcast_site_v2'); if(!raw) return;
-    const s=JSON.parse(raw);
-    if(s){
-      state.spellName = s.spellName || '';
-      state.settings  = s.settings ? { delay: (+s.settings.delay||50), loadedSpell: s.settings.loadedSpell || 'incendio' } : state.settings;
-      state.afterFunction = s.afterFunction || '';
-      state.rays = Array.isArray(s.rays) ? s.rays.map(normalizeRay) : state.rays;
-      state.points = Array.isArray(s.points) && s.points.length ? s.points.map(p=>({
-        commands:(p.commands||[]).map(String),
-        offset: p.offset? {x:+p.offset.x||0, y:+p.offset.y||0, z:+p.offset.z||0}:{x:0,y:0,z:0}
-      })) : state.points;
-      state.selected = Math.min(+s.selected||0, state.points.length-1);
-    }
-  }catch{} };
-  function normalizeRay(r){
-    return {
-      name: r.name || `Cast`,
-      enabled: !!r.enabled,
-      collapsed: !!r.collapsed,
-      step: +r.step || 0.5,
-      maxSteps: Math.max(1, +r.maxSteps || 40),
-      particles: Array.isArray(r.particles) ? r.particles.map(p=>({
-        name: p.name || 'small_flame',
-        dx: +p.dx || 0, dy:+p.dy || 0, dz:+p.dz || 0, speed:+p.speed || 0, count: Math.max(0, +p.count || 0)
-      })) : [],
-      blockChecks: Array.isArray(r.blockChecks) ? r.blockChecks.map(b=>({ id: b.id||'#air', cmd: (b.cmd||'').toString(), pass: !!b.pass })) : [],
-      entityChecks: Array.isArray(r.entityChecks) ? r.entityChecks.map(e=>({ selector: (e.selector||'@e[distance=..0.6]').toString(), cmd: (e.cmd||'').toString(), pass: !!e.pass })) : [],
-    };
-  }
+  function save(){ try{ localStorage.setItem('spellcast_site_v3', JSON.stringify(state)); }catch{} }
+  function load(){ try{
+    const raw=localStorage.getItem('spellcast_site_v3'); if(!raw) return;
+    const s=JSON.parse(raw)||{};
+    state.spellName=s.spellName||''; state.author=s.author||''; state.spellDelay=+s.spellDelay||50;
+    state.points=Array.isArray(s.points)&&s.points.length? s.points.map(normPoint):[mkPoint()];
+    state.selected=Math.min(+s.selected||0, state.points.length-1);
+    state.finishCommands=Array.isArray(s.finishCommands)? s.finishCommands.map(String):[];
+    state.raycasts=Array.isArray(s.raycasts)? s.raycasts.map(normRay):[];
+  }catch{} }
   load();
 
-  // init text inputs
-  if(nameInput) nameInput.value = state.spellName;
-  if(spellDelayEl)  spellDelayEl.value  = state.settings.delay;
-  if(loadedSpellEl) loadedSpellEl.value = state.settings.loadedSpell;
-  if(loadedSpellLabel) loadedSpellLabel.textContent = state.settings.loadedSpell;
-  if(afterFunctionEl) afterFunctionEl.value = state.afterFunction;
+  // ---------- Init inputs ----------
+  spellNameEl.value = state.spellName || '';
+  authorEl.value = state.author || '';
+  spellDelayEl.value = state.spellDelay;
+  afterFunctionEl.value = (state.finishCommands||[]).join('\n');
 
   // ---------- Renderers ----------
   function renderPoints(){
-    if(!pointsListEl) return;
-    pointsListEl.innerHTML='';
+    pointsListEl.innerHTML = '';
     state.points.forEach((p,i)=>{
       const el = document.createElement('div');
       el.className = 'point-item' + (i===state.selected?' active':'');
@@ -122,432 +86,339 @@
   }
 
   function renderCommands(){
-    if(!commandsEl) return;
     const p = state.points[state.selected];
     commandsEl.innerHTML = '';
-
-    p.commands.forEach((cmd, i)=>{
+    p.commands.forEach((cmd, idx)=>{
       const row = document.createElement('div');
       row.className = 'cmd-row';
       row.innerHTML = `
-        <textarea class="cmd-text" rows="1" placeholder="$data modify ...">${esc(cmd)}</textarea>
-        <button class="btn small danger" title="Delete command">✕</button>
-      `;
-      const ta = row.querySelector('.cmd-text');
+        <textarea class="cmd-text" rows="1" spellcheck="false" placeholder="$data modify ...">${esc(cmd)}</textarea>
+        <button class="btn small danger">✕</button>`;
+      const ta = row.querySelector('textarea');
       const del = row.querySelector('button');
-
-      const fit = ()=>{ ta.style.height='auto'; ta.style.height = (ta.scrollHeight)+'px'; };
+      const fit = ()=>{ ta.style.height='auto'; ta.style.height = ta.scrollHeight+'px'; };
       ta.addEventListener('input', ()=>{
-        state.points[state.selected].commands[i] = ta.value;
+        state.points[state.selected].commands[idx] = ta.value;
         fit(); renderPreview(); save();
       });
       fit();
-
       del.addEventListener('click', ()=>{
-        state.points[state.selected].commands.splice(i,1);
+        state.points[state.selected].commands.splice(idx,1);
         renderCommands(); renderPoints(); renderPreview(); save();
       });
-
       commandsEl.appendChild(row);
     });
   }
 
   function renderEditor(){
-    if(selectedLabelEl) selectedLabelEl.textContent = `Point ${state.selected}`;
+    selectedLabelEl.textContent = `Point ${state.selected}`;
     const p = state.points[state.selected];
-    if(offX) offX.value = p.offset.x;
-    if(offY) offY.value = p.offset.y;
-    if(offZ) offZ.value = p.offset.z;
-    updateThumb();
-    renderCommands();
-    renderOverview();
+    offX.value = p.offset.x; offY.value = p.offset.y; offZ.value = p.offset.z;
+    drawGrid(); updateThumb(); renderCommands(); renderOverview(); renderPreview();
   }
 
   function renderPreview(){
-    if(!previewEl) return;
     const i = state.selected;
     const p = state.points[i];
     const lines = [];
 
     if(i===0){
+      // ensure first command sets spell name storage
       const sn = state.spellName || '<spellName>';
       lines.push(`$data modify storage spellcast:user_data "$(UUID)".current_point.spell_name set value ${sn}`);
     }
-    for(const cmd of p.commands){ if(cmd && cmd.trim()) lines.push(cmd.trim()); }
+    (p.commands||[]).forEach(cmd=>{
+      if(cmd && cmd.trim()) lines.push(cmd.trim());
+    });
+
     if(i < state.points.length - 1){
-      lines.push(`$function spellcasting:spawn_spell_point {UUID:$(UUID),ox:${trimFloat(p.offset.x)},oy:${trimFloat(p.offset.y)},oz:${trimFloat(p.offset.z)}}`);
-    } else {
-      lines.push(`# Set Spell Delay // add option to change on website`);
-      lines.push(`scoreboard players set @s spell_delay ${state.settings.delay}`);
-      lines.push(``);
-      lines.push(`# Set function to run after delay // add option to change on website // this is what happens after the spell is completed`);
-      // IMPORTANT: set loaded_spell to the spell's own name so the correct activate function is called
-      const actName = safeName(state.spellName) || 'spell';
-      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${actName}`);
-      lines.push(``);
-      lines.push(`# Keep this exact formatting`);
+      lines.push(`$function spellcasting:spawn_spell_point {UUID:$(UUID),ox:${trim(p.offset.x)},oy:${trim(p.offset.y)},oz:${trim(p.offset.z)}}`);
+    }else{
+      // final footer per new C#
       lines.push(`$kill @e[tag=spell_pos,nbt={data:{owner:$(UUID)}}]`);
       lines.push(`$kill @e[tag=spell_point,nbt={data:{owner:$(UUID)}}]`);
-      lines.push(``);
-      lines.push(`# This is the same`);
+      lines.push(`scoreboard players set @s spell_delay ${state.spellDelay}`);
+      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${safeName(state.spellName)||'spell'}`);
     }
     lines.push(`$data modify storage spellcast:user_data "$(UUID)".current_point.next_func set value ${i+1}`);
-    previewEl.textContent = lines.join('\n');
 
-    updateThumb();
-    renderOverview();
+    previewEl.textContent = lines.join('\n');
   }
 
   function renderRays(){
-    if(!raysContainer) return;
     raysContainer.innerHTML = '';
-    state.rays.forEach((ray, idx)=>{
-      const rayEl = document.createElement('div');
-      rayEl.className = 'ray';
+    state.raycasts.forEach((ray, idx)=>{
+      const card = document.createElement('div');
+      card.className = 'ray';
 
       const head = document.createElement('div');
       head.className = 'ray-head';
       head.innerHTML = `
         <div class="title">${ray.name}</div>
         <div class="controls">
-          <label class="muted tiny" style="display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" ${ray.enabled?'checked':''} data-act="toggle" /> Enabled
-          </label>
           <span class="muted tiny">Step</span>
-          <input type="number" class="step" value="${ray.step}" step="any" style="width:84px">
+          <input type="number" class="step" value="${ray.step}" step="any" style="width:80px">
           <span class="muted tiny">Max Steps</span>
-          <input type="number" class="max" value="${ray.maxSteps}" step="1" min="1" style="width:84px">
+          <input type="number" class="max" value="${ray.max_distance}" step="1" min="1" style="width:80px">
           <button class="btn small" data-act="collapse">${ray.collapsed?'▾ Expand':'▴ Collapse'}</button>
           <button class="btn small danger" data-act="del">Delete</button>
-        </div>
-      `;
-      rayEl.appendChild(head);
+        </div>`;
+      card.appendChild(head);
 
       const body = document.createElement('div');
       body.className = 'ray-body';
-      body.style.display = ray.collapsed? 'none':'grid';
+      body.style.display = ray.collapsed ? 'none' : 'block';
+      body.innerHTML = `
+        <div class="group">
+          <div class="group-title">
+            <div class="label">Ray Commands</div>
+            <button class="btn small success" data-add-cmd>+</button>
+          </div>
+          <div class="group-items cmds"></div>
+        </div>
 
-      const grid = document.createElement('div');
-      grid.className = 'ray-grid';
+        <div class="ray-grid">
+          <div class="group">
+            <div class="group-title">
+              <div class="label">Block Checks</div>
+              <button class="btn small success" data-add-block>+</button>
+            </div>
+            <div class="group-items blocks"></div>
+          </div>
 
-      const checksCol = document.createElement('div');
-      checksCol.appendChild(groupBlocks(ray, idx));
-      checksCol.appendChild(groupEntities(ray, idx));
+          <div class="group">
+            <div class="group-title">
+              <div class="label">Entity Checks</div>
+              <button class="btn small success" data-add-entity>+</button>
+            </div>
+            <div class="group-items ents"></div>
+          </div>
+        </div>
+      `;
+      card.appendChild(body);
 
-      const particlesCol = document.createElement('div');
-      particlesCol.appendChild(groupParticles(ray, idx));
-
-      grid.appendChild(checksCol);
-      grid.appendChild(particlesCol);
-      body.appendChild(grid);
-      rayEl.appendChild(body);
-
-      head.querySelector('[data-act="toggle"]')?.addEventListener('change', e=>{
-        state.rays[idx].enabled = !!e.target.checked; save();
+      // head handlers
+      head.querySelector('.step').addEventListener('input', e=>{
+        ray.step = parseFloat(e.target.value)||0.5; save();
       });
-      head.querySelector('.step')?.addEventListener('input', e=>{
-        state.rays[idx].step = parseFloat(e.target.value)||0.5; save();
+      head.querySelector('.max').addEventListener('input', e=>{
+        ray.max_distance = Math.max(1, parseInt(e.target.value,10)||50); save();
       });
-      head.querySelector('.max')?.addEventListener('input', e=>{
-        state.rays[idx].maxSteps = Math.max(1, parseInt(e.target.value,10)||40); save();
+      head.querySelector('[data-act="collapse"]').addEventListener('click', ()=>{
+        ray.collapsed = !ray.collapsed; renderRays(); save();
       });
-      head.querySelector('[data-act="collapse"]')?.addEventListener('click', ()=>{
-        state.rays[idx].collapsed = !state.rays[idx].collapsed;
-        renderRays(); save();
-      });
-      head.querySelector('[data-act="del"]')?.addEventListener('click', ()=>{
-        state.rays.splice(idx,1); renderRays(); save();
+      head.querySelector('[data-act="del"]').addEventListener('click', ()=>{
+        state.raycasts.splice(idx,1); renderRays(); save();
       });
 
-      raysContainer.appendChild(rayEl);
+      // commands
+      const cmdsWrap = body.querySelector('.cmds');
+      function renderCmds(){
+        cmdsWrap.innerHTML = '';
+        ray.commands.forEach((c,i)=>{
+          const row = document.createElement('div');
+          row.className = 'cmd-row';
+          row.innerHTML = `
+            <textarea class="cmd-text" rows="1" spellcheck="false" placeholder="particle small_flame ^ ^ ^ 0 0 0 0 1">${esc(c)}</textarea>
+            <button class="btn small danger">✕</button>`;
+          const ta = row.querySelector('textarea'), del = row.querySelector('button');
+          const fit = ()=>{ ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px'; };
+          ta.addEventListener('input', ()=>{ ray.commands[i]=ta.value; fit(); save(); });
+          fit();
+          del.addEventListener('click', ()=>{ ray.commands.splice(i,1); renderCmds(); save(); });
+          cmdsWrap.appendChild(row);
+        });
+      }
+      body.querySelector('[data-add-cmd]').addEventListener('click', ()=>{
+        ray.commands.push(''); renderCmds(); save();
+      });
+      renderCmds();
+
+      // block checks
+      const blocksWrap = body.querySelector('.blocks');
+      function renderBlocks(){
+        blocksWrap.innerHTML='';
+        ray.block_checks.forEach((b,i)=>{
+          const row = document.createElement('div'); row.className='rule';
+          row.innerHTML = `
+            <div class="key">ID:</div>
+            <input type="text" value="${esc(b.id)}" placeholder="minecraft:stone or #air">
+            <button class="btn small del">✕</button>
+            <div class="key">Command:</div>
+            <input type="text" value="${esc(b.cmd)}" placeholder="say block hit">
+            <label class="pass"><input type="checkbox" ${b.pass?'checked':''}> Pass through</label>
+            <label class="invert"><input type="checkbox" ${b.invert?'checked':''}> Inverted</label>`;
+          const [ , idI, del, , cmdI, passLbl ] = row.children;
+          idI.addEventListener('input', e=>{ b.id=e.target.value; save(); });
+          cmdI.addEventListener('input', e=>{ b.cmd=e.target.value; save(); });
+          passLbl.querySelector('input').addEventListener('change', e=>{ b.pass=!!e.target.checked; save(); });
+          row.querySelector('.invert input').addEventListener('change', e=>{ b.invert=!!e.target.checked; save(); });
+          del.addEventListener('click', ()=>{ ray.block_checks.splice(i,1); renderBlocks(); save(); });
+          blocksWrap.appendChild(row);
+        });
+      }
+      body.querySelector('[data-add-block]').addEventListener('click', ()=>{
+        ray.block_checks.push({id:'#air', cmd:'', pass:false, invert:false}); renderBlocks(); save();
+      });
+      renderBlocks();
+
+      // entity checks
+      const entsWrap = body.querySelector('.ents');
+      function renderEnts(){
+        entsWrap.innerHTML='';
+        ray.entity_checks.forEach((e,i)=>{
+          const row = document.createElement('div'); row.className='rule';
+          row.innerHTML = `
+            <div class="key">Selector:</div>
+            <input type="text" value="${esc(e.selector)}" placeholder='@e[type=cow,distance=..0.6]'>
+            <button class="btn small del">✕</button>
+            <div class="key">Command:</div>
+            <input type="text" value="${esc(e.cmd)}" placeholder='say entity'>
+            <label class="pass"><input type="checkbox" ${e.pass?'checked':''}> Pass through</label>
+            <label class="invert"><input type="checkbox" ${e.invert?'checked':''}> Inverted</label>`;
+          const [ , selI, del, , cmdI, passLbl ] = row.children;
+          selI.addEventListener('input', ev=>{ e.selector=ev.target.value; save(); });
+          cmdI.addEventListener('input', ev=>{ e.cmd=ev.target.value; save(); });
+          passLbl.querySelector('input').addEventListener('change', ev=>{ e.pass=!!ev.target.checked; save(); });
+          row.querySelector('.invert input').addEventListener('change', ev=>{ e.invert=!!ev.target.checked; save(); });
+          del.addEventListener('click', ()=>{ ray.entity_checks.splice(i,1); renderEnts(); save(); });
+          entsWrap.appendChild(row);
+        });
+      }
+      body.querySelector('[data-add-entity]').addEventListener('click', ()=>{
+        ray.entity_checks.push({selector:'@e[distance=..0.6]', cmd:'', pass:false, invert:false}); renderEnts(); save();
+      });
+      renderEnts();
+
+      raysContainer.appendChild(card);
     });
   }
 
-  function groupBlocks(ray, idx){
-    const wrap = document.createElement('div');
-    wrap.className = 'group';
-    wrap.innerHTML = `
-      <div class="group-title">
-        <div class="label">Block Checks</div>
-        <button class="btn small success" data-act="add">+</button>
-      </div>
-      <div class="group-items"></div>
-    `;
-    const items = wrap.querySelector('.group-items');
-    function render(){
-      items.innerHTML='';
-      ray.blockChecks.forEach((b,i)=>{
-        const row = document.createElement('div');
-        row.className='rule';
-        row.innerHTML = `
-          <div class="key">ID:</div>
-          <input type="text" value="${esc(b.id)}" placeholder="minecraft:dirt or #air" style="width:260px">
-          <button class="btn small del">✕</button>
-          <div class="key">Command:</div>
-          <input type="text" value="${esc(b.cmd)}" placeholder="say hello world" style="width:360px">
-          <label class="pass"><input type="checkbox" ${b.pass?'checked':''}> Pass through</label>
-        `;
-        const [ , idInput, delBtn, , cmdInput, passLbl ] = row.children;
-        idInput.addEventListener('input',e=>{ state.rays[idx].blockChecks[i].id = e.target.value; save(); });
-        cmdInput.addEventListener('input',e=>{ state.rays[idx].blockChecks[i].cmd = e.target.value; save(); });
-        passLbl.querySelector('input').addEventListener('change',e=>{ state.rays[idx].blockChecks[i].pass = !!e.target.checked; save(); });
-        delBtn.addEventListener('click', ()=>{ state.rays[idx].blockChecks.splice(i,1); render(); save(); });
-        items.appendChild(row);
-      });
+  function renderOverview(){
+    overviewSvg.innerHTML='';
+    const pts = state.points.map(p=>({ x:(p.offset.x*CELL)+SIZE/2, y:SIZE/2-(p.offset.y*CELL) }));
+    for(let i=0;i<pts.length-1;i++){
+      addLine(pts[i], pts[i+1], '#38bdf8', 2);
     }
-    wrap.querySelector('[data-act="add"]')?.addEventListener('click', ()=>{
-      state.rays[idx].blockChecks.push({id:'#air', cmd:'', pass:false}); render(); save();
+    pts.forEach((p,idx)=>{
+      const g=svgEl('g'), c=svgEl('circle'), t=svgEl('text');
+      c.setAttribute('cx',p.x); c.setAttribute('cy',p.y); c.setAttribute('r','7');
+      c.setAttribute('fill', idx===state.selected ? '#22d3ee' : '#38bdf8'); c.setAttribute('opacity','0.95');
+      t.setAttribute('x',p.x); t.setAttribute('y',p.y+3); t.setAttribute('text-anchor','middle');
+      t.setAttribute('font-size','9'); t.setAttribute('font-weight','700'); t.setAttribute('fill','#0b1020'); t.textContent=idx;
+      g.appendChild(c); g.appendChild(t); overviewSvg.appendChild(g);
     });
-    render();
-    return wrap;
-  }
-
-  function groupEntities(ray, idx){
-    const wrap = document.createElement('div');
-    wrap.className = 'group';
-    wrap.innerHTML = `
-      <div class="group-title">
-        <div class="label">Entity Checks</div>
-        <button class="btn small success" data-act="add">+</button>
-      </div>
-      <div class="group-items"></div>
-    `;
-    const items = wrap.querySelector('.group-items');
-    function render(){
-      items.innerHTML='';
-      ray.entityChecks.forEach((eRule,i)=>{
-        const row = document.createElement('div');
-        row.className='rule';
-        row.innerHTML = `
-          <div class="key">Selector:</div>
-          <input type="text" value="${esc(eRule.selector)}" placeholder='@e[type=cow,distance=..1]' style="width:320px">
-          <button class="btn small del">✕</button>
-          <div class="key">Command:</div>
-          <input type="text" value="${esc(eRule.cmd)}" placeholder="say entity hit" style="width:360px">
-          <label class="pass"><input type="checkbox" ${eRule.pass?'checked':''}> Pass through</label>
-        `;
-        const [ , selInput, delBtn, , cmdInput, passLbl ] = row.children;
-        selInput.addEventListener('input',e=>{ state.rays[idx].entityChecks[i].selector = e.target.value; save(); });
-        cmdInput.addEventListener('input',e=>{ state.rays[idx].entityChecks[i].cmd = e.target.value; save(); });
-        passLbl.querySelector('input').addEventListener('change',e=>{ state.rays[idx].entityChecks[i].pass = !!e.target.checked; save(); });
-        delBtn.addEventListener('click', ()=>{ state.rays[idx].entityChecks.splice(i,1); render(); save(); });
-        items.appendChild(row);
-      });
+    function addLine(a,b,stroke,w){
+      const l=svgEl('line'); l.setAttribute('x1',a.x); l.setAttribute('y1',a.y); l.setAttribute('x2',b.x); l.setAttribute('y2',b.y);
+      l.setAttribute('stroke',stroke); l.setAttribute('stroke-width',w); l.setAttribute('stroke-linecap','round'); overviewSvg.appendChild(l);
     }
-    wrap.querySelector('[data-act="add"]')?.addEventListener('click', ()=>{
-      state.rays[idx].entityChecks.push({selector:'@e[distance=..0.6]', cmd:'', pass:false}); render(); save();
-    });
-    render();
-    return wrap;
   }
 
-  function groupParticles(ray, idx){
-    const wrap = document.createElement('div');
-    wrap.className = 'group';
-    wrap.innerHTML = `
-      <div class="group-title">
-        <div class="label">Particles</div>
-        <button class="btn small success" data-act="add">+</button>
-      </div>
-      <div class="particles-col"></div>
-    `;
-    const list = wrap.querySelector('.particles-col');
-    function render(){
-      list.innerHTML='';
-      ray.particles.forEach((p,i)=>{
-        const row=document.createElement('div');
-        row.className='particle-row';
-        row.innerHTML=`
-          <input type="text" value="${esc(p.name)}" placeholder="small_flame">
-          <input type="number" step="any" value="${p.dx}">
-          <input type="number" step="any" value="${p.dy}">
-          <input type="number" step="any" value="${p.dz}">
-          <input type="number" step="any" value="${p.speed}">
-          <input type="number" step="1" value="${p.count}">
-          <button class="btn small del">✕</button>
-        `;
-        const [name,dx,dy,dz,speed,count,del] = row.children;
-        name.addEventListener('input',e=>{ p.name=e.target.value; save(); });
-        dx.addEventListener('input',e=>{ p.dx=parseFloat(e.target.value)||0; save(); });
-        dy.addEventListener('input',e=>{ p.dy=parseFloat(e.target.value)||0; save(); });
-        dz.addEventListener('input',e=>{ p.dz=parseFloat(e.target.value)||0; save(); });
-        speed.addEventListener('input',e=>{ p.speed=parseFloat(e.target.value)||0; save(); });
-        count.addEventListener('input',e=>{ p.count=parseInt(e.target.value,10)||0; save(); });
-        del.addEventListener('click',()=>{ state.rays[idx].particles.splice(i,1); render(); save(); });
-        list.appendChild(row);
-      });
+  function rerender(){ renderPoints(); renderEditor(); renderRays(); save(); }
+
+  // ---------- Grid + thumb ----------
+  function drawGrid(){
+    const ctx = grid.getContext('2d');
+    ctx.clearRect(0,0,SIZE,SIZE);
+    ctx.strokeStyle = '#243255';
+    ctx.lineWidth = 1;
+    for(let i=0;i<=CELLS;i++){
+      const p=i*CELL+.5;
+      ctx.beginPath(); ctx.moveTo(0,p); ctx.lineTo(SIZE,p); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p,0); ctx.lineTo(p,SIZE); ctx.stroke();
     }
-    wrap.querySelector('[data-act="add"]')?.addEventListener('click', ()=>{
-      state.rays[idx].particles.push({name:'small_flame',dx:0.1,dy:0.1,dz:0.1,speed:0,count:2});
-      render(); save();
-    });
-    render();
-    return wrap;
-  }
-
-  function rerender(){ renderPoints(); renderEditor(); renderPreview(); renderRays(); save(); }
-
-  // ---------- XY grid ----------
-  function clientToXY(evt){
-    const r = grid.getBoundingClientRect();
-    const xpx = Math.min(Math.max(0,(evt.clientX??evt.touches?.[0]?.clientX)-r.left), SIZE);
-    const ypx = Math.min(Math.max(0,(evt.clientY??evt.touches?.[0]?.clientY)-r.top), SIZE);
-    const x = (xpx - SIZE/2) / CELL;
-    const y = (SIZE/2 - ypx) / CELL;
-    return {x: clamp(x,-RANGE,RANGE), y: clamp(y,-RANGE,RANGE)};
+    // axes
+    ctx.strokeStyle = '#355a8c'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(SIZE/2,0); ctx.lineTo(SIZE/2,SIZE); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,SIZE/2); ctx.lineTo(SIZE,SIZE/2); ctx.stroke();
   }
   function updateThumb(){
-    if(!grid || !thumb) return;
     const p = state.points[state.selected];
     const xpx = (p.offset.x * CELL) + SIZE/2;
     const ypx = SIZE/2 - (p.offset.y * CELL);
-    thumb.style.left = (xpx-5)+'px';
-    thumb.style.top  = (ypx-5)+'px';
+    thumb.style.left = xpx+'px'; thumb.style.top = ypx+'px';
+  }
+  function clientToXY(evt){
+    const r=grid.getBoundingClientRect();
+    const xpx=Math.min(Math.max(0,(evt.clientX??evt.touches?.[0]?.clientX)-r.left),SIZE);
+    const ypx=Math.min(Math.max(0,(evt.clientY??evt.touches?.[0]?.clientY)-r.top),SIZE);
+    const x=(xpx-SIZE/2)/CELL, y=(SIZE/2-ypx)/CELL;
+    return { x: clamp(x,-RANGE,RANGE), y: clamp(y,-RANGE,RANGE) };
   }
   function setXYFromGrid(evt){
-    const {x,y} = clientToXY(evt);
-    const p = state.points[state.selected];
-    p.offset.x = round2(x); p.offset.y = round2(y);
-    if(offX) offX.value = p.offset.x; if(offY) offY.value = p.offset.y;
-    renderPreview(); save();
+    const {x,y}=clientToXY(evt);
+    const p=state.points[state.selected]; p.offset.x=round2(x); p.offset.y=round2(y);
+    offX.value=p.offset.x; offY.value=p.offset.y; updateThumb(); renderOverview(); renderPreview(); save();
   }
-  if(grid){
-    let dragging=false;
-    grid.addEventListener('pointerdown', e=>{ dragging=true; try{grid.setPointerCapture(e.pointerId);}catch{} setXYFromGrid(e); });
-    grid.addEventListener('pointermove', e=>{ if(dragging) setXYFromGrid(e); });
-    grid.addEventListener('pointerup',   e=>{ dragging=false; try{grid.releasePointerCapture(e.pointerId);}catch{} });
-    grid.addEventListener('pointerleave',()=>{ dragging=false; });
-  }
+  let dragging=false;
+  grid.addEventListener('pointerdown',e=>{ dragging=true; try{grid.setPointerCapture(e.pointerId);}catch{} setXYFromGrid(e);});
+  grid.addEventListener('pointermove',e=>{ if(dragging) setXYFromGrid(e); });
+  grid.addEventListener('pointerup',e=>{ dragging=false; try{grid.releasePointerCapture(e.pointerId);}catch{} });
+  grid.addEventListener('pointerleave',()=>{ dragging=false; });
 
-  // ---------- Overview path ----------
-  function renderOverview(){
-    if(!overviewSvg) return;
-    const pts = state.points.map(p=>({ x: (p.offset.x*CELL)+SIZE/2, y: SIZE/2 - (p.offset.y*CELL) }));
-    overviewSvg.innerHTML='';
-    for(let i=0;i<pts.length-1;i++){
-      const a=pts[i], b=pts[i+1];
-      const line=document.createElementNS('http://www.w3.org/2000/svg','line');
-      line.setAttribute('x1',a.x); line.setAttribute('y1',a.y);
-      line.setAttribute('x2',b.x); line.setAttribute('y2',b.y);
-      line.setAttribute('stroke','#38bdf8'); line.setAttribute('stroke-width','2'); line.setAttribute('stroke-linecap','round');
-      overviewSvg.appendChild(line);
-    }
-    pts.forEach((p,idx)=>{
-      const g=document.createElementNS('http://www.w3.org/2000/svg','g');
-      const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
-      c.setAttribute('cx',p.x); c.setAttribute('cy',p.y); c.setAttribute('r','7'); c.setAttribute('fill', idx===state.selected ? '#22d3ee' : '#38bdf8'); c.setAttribute('opacity', '0.95');
-      const t=document.createElementNS('http://www.w3.org/2000/svg','text');
-      t.setAttribute('x',p.x); t.setAttribute('y',p.y+3); t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','9'); t.setAttribute('font-weight','700'); t.setAttribute('fill','#0b1020'); t.textContent=idx;
-      g.appendChild(c); g.appendChild(t); overviewSvg.appendChild(g);
-    });
-  }
+  // ---------- Inputs ----------
+  spellNameEl.addEventListener('input', ()=>{ state.spellName = spellNameEl.value.trim(); renderPreview(); save(); });
+  authorEl.addEventListener('input', ()=>{ state.author = authorEl.value.trim(); save(); });
+  spellDelayEl.addEventListener('input', ()=>{ const v=parseInt(spellDelayEl.value,10); if(Number.isFinite(v)) state.spellDelay=v; renderPreview(); save(); });
 
-  // ---------- Buttons & inputs ----------
-  addPointBtn?.addEventListener('click', ()=>{
-    state.points.push({ commands: [], offset: {x:0,y:0,z:0} });
-    state.selected = state.points.length - 1;
+  offX.addEventListener('input', ()=>{ const v=parseFloat(offX.value); if(Number.isFinite(v)){ state.points[state.selected].offset.x=v; updateThumb(); renderOverview(); renderPreview(); save(); }});
+  offY.addEventListener('input', ()=>{ const v=parseFloat(offY.value); if(Number.isFinite(v)){ state.points[state.selected].offset.y=v; updateThumb(); renderOverview(); renderPreview(); save(); }});
+  offZ.addEventListener('input', ()=>{ const v=parseFloat(offZ.value); if(Number.isFinite(v)){ state.points[state.selected].offset.z=v; renderPreview(); save(); }});
+
+  addPointBtn.addEventListener('click', ()=>{ state.points.push(mkPoint()); state.selected=state.points.length-1; rerender(); });
+  deletePointBtn.addEventListener('click', ()=>{
+    if(!state.points.length) return;
+    const del = state.selected;
+    state.points.splice(del,1);
+    if(!state.points.length){ state.points.push(mkPoint()); }
+    state.selected = Math.min(state.points.length-1, Math.max(0, del-1));
     rerender();
   });
+  clearPointBtn.addEventListener('click', ()=>{
+    const p=state.points[state.selected]; p.commands=[]; renderCommands(); renderPreview(); save();
+  });
+  resetOffsetBtn.addEventListener('click', ()=>{
+    const p=state.points[state.selected]; p.offset={x:0,y:0,z:0};
+    offX.value=0; offY.value=0; offZ.value=0; updateThumb(); renderOverview(); renderPreview(); save();
+  });
 
-  addCmdBtn?.addEventListener('click', ()=>{
+  addCmdBtn.addEventListener('click', ()=>{
     state.points[state.selected].commands.push('');
-    renderCommands(); renderPreview(); renderPoints(); save();
+    renderCommands(); renderPreview(); save();
   });
 
-  clearPointBtn?.addEventListener('click', ()=>{
-    const idx = state.selected;
-    if (idx < 0 || idx >= state.points.length) return;
-    state.points[idx].commands = [];
-    renderCommands(); renderPreview(); renderPoints(); updateThumb(); save();
-  });
-
-  deletePointBtn?.addEventListener('click', ()=>{
-    if (state.points.length === 0) return;
-    const delIdx = state.selected;
-    state.points.splice(delIdx, 1);
-    if (state.points.length === 0) {
-      state.points.push({ commands: [], offset: { x: 0, y: 0, z: 0 } });
-    }
-    state.selected = Math.min(Math.max(0, delIdx - 1), state.points.length - 1);
-    const p = state.points[state.selected];
-    if (offX) offX.value = p.offset.x;
-    if (offY) offY.value = p.offset.y;
-    if (offZ) offZ.value = p.offset.z;
-    renderPoints(); renderEditor(); renderPreview(); updateThumb(); save();
-  });
-
-  resetOffsetBtn?.addEventListener('click', ()=>{
-    const p = state.points[state.selected];
-    p.offset = {x:0,y:0,z:0};
-    if(offX) offX.value = 0;
-    if(offY) offY.value = 0;
-    if(offZ) offZ.value = 0;
-    updateThumb(); renderPreview(); renderPoints(); renderOverview(); save();
-  });
-
-  nameInput?.addEventListener('input', ()=>{
-    state.spellName = nameInput.value.trim();
-    renderPreview(); save();
-  });
-  offX?.addEventListener('input', ()=>{
-    const v = parseFloat(offX.value);
-    if(Number.isFinite(v)){
-      state.points[state.selected].offset.x = v;
-      updateThumb(); renderPreview(); renderOverview(); renderPoints(); save();
-    }
-  });
-  offY?.addEventListener('input', ()=>{
-    const v = parseFloat(offY.value);
-    if(Number.isFinite(v)){
-      state.points[state.selected].offset.y = v;
-      updateThumb(); renderPreview(); renderOverview(); renderPoints(); save();
-    }
-  });
-  offZ?.addEventListener('input', ()=>{
-    const v = parseFloat(offZ.value);
-    if(Number.isFinite(v)){
-      state.points[state.selected].offset.z = v;
-      renderPreview(); save();
-    }
-  });
-
-  // After-cast function textarea (multi-line, macro-aware preview only saved in ZIP)
-  afterFunctionEl?.addEventListener('input', ()=>{
-    state.afterFunction = afterFunctionEl.value;
+  afterFunctionEl.addEventListener('input', ()=>{
+    state.finishCommands = splitToLines(afterFunctionEl.value);
     save();
   });
 
-  loadedSpellEl?.addEventListener('input', ()=>{
-    state.settings.loadedSpell = loadedSpellEl.value.trim();
-    if(loadedSpellLabel) loadedSpellLabel.textContent = state.settings.loadedSpell || '';
-    save();
+  addRayBtn.addEventListener('click', ()=>{
+    state.raycasts.push(mkRay());
+    renderRays(); save();
   });
 
   // ---------- Export / Import ----------
-  $('#exportJson')?.addEventListener('click',()=>{
+  $('#exportJson').addEventListener('click', ()=>{
     const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
-    saveAs(blob,`${safeName(state.spellName)||'spell'}.json`);
+    saveAs(blob, `${safeName(state.spellName)||'spell'}.json`);
   });
-  $('#importJson')?.addEventListener('change',e=>{
+  $('#importJson').addEventListener('change', e=>{
     const f=e.target.files[0]; if(!f) return;
     const r=new FileReader();
     r.onload=()=>{
       try{
         const s=JSON.parse(r.result);
-        if(!s || !Array.isArray(s.points)) return alert('Invalid JSON file');
-        Object.assign(state, {
+        Object.assign(state,{
           spellName: s.spellName||'',
-          settings: s.settings ? { delay: (+s.settings.delay||50), loadedSpell: s.settings.loadedSpell || 'incendio' } : state.settings,
-          afterFunction: s.afterFunction || '',
-          rays: Array.isArray(s.rays) ? s.rays.map(normalizeRay) : state.rays,
-          points: s.points.map(p=>({commands:(p.commands||[]).map(String), offset:p.offset?{x:+p.offset.x||0,y:+p.offset.y||0,z:+p.offset.z||0}:{x:0,y:0,z:0}})),
-          selected: 0
+          author: s.author||'',
+          spellDelay: +s.spellDelay||50,
+          points: Array.isArray(s.points)&&s.points.length? s.points.map(normPoint):[mkPoint()],
+          selected: Math.min(+s.selected||0, (s.points?.length||1)-1),
+          finishCommands: Array.isArray(s.finishCommands)? s.finishCommands.map(String):[],
+          raycasts: Array.isArray(s.raycasts)? s.raycasts.map(normRay):[]
         });
-        if(nameInput) nameInput.value=state.spellName;
-        if(spellDelayEl) spellDelayEl.value = state.settings.delay;
-        if(loadedSpellEl) loadedSpellEl.value = state.settings.loadedSpell;
-        if(loadedSpellLabel) loadedSpellLabel.textContent = state.settings.loadedSpell || '';
-        if(afterFunctionEl) afterFunctionEl.value = state.afterFunction;
+        spellNameEl.value=state.spellName; authorEl.value=state.author; spellDelayEl.value=state.spellDelay;
+        afterFunctionEl.value=(state.finishCommands||[]).join('\n');
         rerender();
       }catch(err){ alert('Import failed: '+err.message); }
     };
@@ -555,182 +426,176 @@
   });
 
   // ---------- ZIP Export ----------
-  $('#exportZip')?.addEventListener('click',async()=>{
-    if(!state.spellName){ alert('Enter a spell name first'); return; }
+  $('#exportZip').addEventListener('click', async()=>{
+    if(!state.spellName){ alert('Enter a spell name'); return; }
+    const spellId = safeName(state.spellName) || 'spell';
 
     const zip = new JSZip();
 
     // pack.mcmeta
-    const packMcmeta = `{
+    const pack = `{
   "pack": {
     "pack_format": 81,
-    "description": "Spellcasting extension pack",
+    "description": "Spellcasting extension pack by ${escJson(state.author||'')}",
     "supported_formats": {
       "min_inclusive": 45,
       "max_inclusive": 81
     }
   }
-}`;
-    zip.file("pack.mcmeta", packMcmeta + "\n");
+}
+`;
+    zip.file('pack.mcmeta', pack);
 
-    // structure
-    const spellId = safeName(state.spellName) || 'spell';
-    const base = "data/spellcasting/function/spells/";
-    const activateDir = zip.folder(base + "activate");
-    const patternsDir = zip.folder(base + "patterns/" + spellId);
-    const rayBase = base + spellId + "/";
+    // dirs
+    const base = 'data/spellcasting/function/spells/';
+    const activateDir = zip.folder(base + 'activate');
+    const spellDir = zip.folder(base + spellId);
+    const patternsDir = zip.folder(base + 'patterns/' + spellId);
 
-    // activate content — IMPORTANT: filename = spell name (so finish cast calls the right one)
-    const actLines = [];
-    state.rays.forEach((ray, i)=>{
-      if(!ray.enabled) return;
-      const hasMacros = rayHasMacros(ray);
-      actLines.push(`# ${ray.name}`);
-      actLines.push(`scoreboard players set @s spell_ray_steps ${Math.max(1, ray.maxSteps)}`);
-      if(hasMacros){
-        actLines.push(`execute at @s anchored eyes run function spellcasting:spells/${spellId}/ray_tick_${i} with entity @s`);
-      }else{
-        actLines.push(`execute at @s anchored eyes run function spellcasting:spells/${spellId}/ray_tick_${i}`);
-      }
-      actLines.push('');
-    });
-
-    // After-cast function (multi-line, macro-aware)
-    const afterLines = (state.afterFunction||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-    afterLines.forEach(line=>{
-      const hasMacro = /\$\([A-Za-z0-9_]+\)/.test(line);
-      actLines.push(hasMacro ? `$${line}` : line);
-    });
-
-    activateDir.file(`${spellId}.mcfunction`, actLines.join("\n") + (actLines.length? "\n" : ""));
-
-    // pattern point files
+    // points
     for(let i=0;i<state.points.length;i++){
-      patternsDir.file(`${i}.mcfunction`, buildPointFile(i, spellId) + "\n");
+      const text = buildPointFile(i, spellId);
+      patternsDir.file(`${i}.mcfunction`, text + '\n');
     }
 
     // rays
-    const rayFolder = zip.folder(rayBase);
-    state.rays.forEach((ray, i)=>{
-      if(!ray.enabled) return;
-      rayFolder.file(`ray_tick_${i}.mcfunction`, buildRayFile(ray, i, spellId) + "\n");
+    state.raycasts.forEach((ray,i)=>{
+      spellDir.file(`ray_tick_${i}.mcfunction`, buildRayFile(ray, i, spellId) + '\n');
     });
 
-    const blob = await zip.generateAsync({type:'blob'});
-    const zipName = `${state.spellName || 'Spell_Name'}.zip`;
-    saveAs(blob, zipName);
-    statusEl.textContent = "ZIP downloaded";
-    setTimeout(()=>{ statusEl.textContent = ""; }, 1500);
+    // finish (activate/<spell>.mcfunction)
+    const finish = buildFinishFile(spellId);
+    activateDir.file(`${spellId}.mcfunction`, finish + '\n');
+
+    const blob=await zip.generateAsync({type:'blob'});
+    saveAs(blob, `${state.spellName}.zip`);
+    statusEl.textContent='ZIP downloaded'; setTimeout(()=>statusEl.textContent='',1500);
   });
 
   // ---------- Builders ----------
   function buildPointFile(i, spellId){
     const p = state.points[i];
-    const lines=[];
+    const lines = [];
+
     if(i===0){
-      const sn=state.spellName||'<spellName>';
+      const sn = state.spellName || '<spellName>';
       lines.push(`$data modify storage spellcast:user_data "$(UUID)".current_point.spell_name set value ${sn}`);
     }
-    for(const cmd of (p.commands||[])){ if(cmd && cmd.trim()) lines.push(cmd.trim()); }
-    if(i<state.points.length-1){
-      lines.push(`$function spellcasting:spawn_spell_point {UUID:$(UUID),ox:${trimFloat(p.offset.x)},oy:${trimFloat(p.offset.y)},oz:${trimFloat(p.offset.z)}}`);
+    (p.commands||[]).forEach(c=>{ if(c && c.trim()) lines.push(c.trim()); });
+
+    if(i < state.points.length - 1){
+      lines.push(`$function spellcasting:spawn_spell_point {UUID:$(UUID),ox:${trim(p.offset.x)},oy:${trim(p.offset.y)},oz:${trim(p.offset.z)}}`);
     } else {
-      // Final point: ensure next phase calls the right activate file by name (spellId)
-      lines.push(`# Set Spell Delay // add option to change on website`);
-      lines.push(`scoreboard players set @s spell_delay ${state.settings.delay}`);
-      lines.push(``);
-      lines.push(`# Set function to run after delay // this is what happens after the spell is completed`);
-      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${spellId}`);
-      lines.push(``);
-      lines.push(`# Keep this exact formatting`);
       lines.push(`$kill @e[tag=spell_pos,nbt={data:{owner:$(UUID)}}]`);
       lines.push(`$kill @e[tag=spell_point,nbt={data:{owner:$(UUID)}}]`);
-      lines.push(``);
-      lines.push(`# This is the same`);
+      lines.push(`scoreboard players set @s spell_delay ${state.spellDelay}`);
+      lines.push(`$data modify storage spellcast:user_data "$(UUID)".loaded_spell set value ${spellId}`);
     }
     lines.push(`$data modify storage spellcast:user_data "$(UUID)".current_point.next_func set value ${i+1}`);
     return lines.join('\n');
   }
 
+  function buildFinishFile(spellId){
+    const out = [];
+    (state.finishCommands||[]).forEach(line=>{
+      if(!line.trim()) return;
+      out.push(containsMacro(line) ? `$${line.trim()}` : line.trim());
+    });
+    state.raycasts.forEach((ray,i)=>{
+      out.push(`scoreboard players set @s spell_ray_steps ${Math.max(1, ray.max_distance|0)}`);
+      out.push(`execute at @s anchored eyes run function spellcasting:spells/${spellId}/ray_tick_${i} with entity @s`);
+    });
+    return out.join('\n');
+  }
+
   function buildRayFile(ray, idx, spellId){
     const out = [];
-    const hasMacros = rayHasMacros(ray);
-    const macroObj = hasMacros ? buildMacroObject(ray) : '';
-
-    out.push(`# ${ray.name}`);
-    out.push(`# Limiter (requires objective 'spell_ray_steps')`);
+    out.push(`# ${ray.name || `Ray ${idx+1}`}`);
     out.push(`execute if score @s spell_ray_steps matches ..0 run return fail`);
     out.push(`scoreboard players remove @s spell_ray_steps 1`);
     out.push(``);
 
-    ray.particles.forEach(p=>{
-      out.push(`particle ${p.name||'small_flame'} ^ ^ ^ ${num(p.dx)} ${num(p.dy)} ${num(p.dz)} ${num(p.speed)} ${Math.max(0,Math.floor(p.count||0))}`);
+    // free-form ray commands
+    (ray.commands||[]).forEach(cmd=>{
+      if(!cmd || !cmd.trim()) return;
+      out.push(containsMacro(cmd) ? `$${cmd.trim()}` : cmd.trim());
     });
 
-    ray.blockChecks.forEach(b=>{
-      if(!b.id || !b.cmd) return;
-      if(b.pass){
-        out.push(`execute unless block ^ ^ ^ ${b.id} run ${b.cmd}`);
-      }else{
-        out.push(`execute unless block ^ ^ ^ ${b.id} run return ${b.cmd}`);
-      }
-    });
-
-    ray.entityChecks.forEach(e=>{
-      if(!e.selector || !e.cmd) return;
+    // entity checks (supports invert -> unless)
+    (ray.entity_checks||[]).forEach(e=>{
+      if(!e.selector) return;
+      const cond = e.invert ? 'unless' : 'if';
       const base = e.pass
-        ? `execute if entity ${e.selector} run ${e.cmd}`
-        : `execute if entity ${e.selector} run return ${e.cmd}`;
-      if(containsMacro(base)){
-        out.push(`$${base}`);
-      }else{
-        out.push(base);
-      }
+        ? `execute ${cond} entity ${e.selector} run ${e.cmd||''}`.trim()
+        : `execute ${cond} entity ${e.selector} run return ${e.cmd||'fail'}`.trim();
+      out.push(containsMacro(base) ? `$${base}` : base);
     });
 
-    const step = `execute positioned ^ ^ ^${num(ray.step)} run function spellcasting:spells/${spellId}/ray_tick_${idx}`;
-    if(hasMacros){
-      out.push(`$${step} ${macroObj}`);
+    // block checks (supports invert -> unless)
+    (ray.block_checks||[]).forEach(b=>{
+      if(!b.id) return;
+      const cond = b.invert ? 'unless' : 'if';
+      const base = b.pass
+        ? `execute ${cond} block ^ ^ ^ ${b.id} run ${b.cmd||''}`.trim()
+        : `execute ${cond} block ^ ^ ^ ${b.id} run return ${b.cmd||'fail'}`.trim();
+      out.push(base);
+    });
+
+    // step forward
+    const stepLine = `execute positioned ^ ^ ^${num(ray.step)} run function spellcasting:spells/${spellId}/ray_tick_${idx}`;
+    if(rayHasMacros(ray)){
+      out.push(`$${stepLine} ${buildMacroObjectFromRay(ray)}`);
     }else{
-      out.push(step);
+      out.push(stepLine);
     }
     return out.join('\n');
   }
 
-  // ---------- Macro helpers ----------
-  function containsMacro(s){
-    return /\$\([A-Za-z0-9_]+\)/.test(String(s||''));
-  }
-  function extractMacroNamesFromRay(ray){
-    const names = new Set();
-    (ray.entityChecks||[]).forEach(e=>{
-      const scan = (txt)=>{
-        String(txt||'').replace(/\$\(([A-Za-z0-9_]+)\)/g, (_,name)=>{ names.add(name); return ''; });
-      };
-      scan(e.selector);
-      scan(e.cmd);
-    });
-    return Array.from(names);
-  }
-  function rayHasMacros(ray){
-    return extractMacroNamesFromRay(ray).length > 0;
-  }
-  function buildMacroObject(ray){
-    const names = extractMacroNamesFromRay(ray);
-    if(!names.length) return '';
-    const pairs = names.map(n=>`${n}:$(${n})`);
-    return `{${pairs.join(',')}}`;
-  }
-
-  // ---------- Init ----------
-  renderPoints(); renderEditor(); renderPreview(); renderRays();
-
-  // ---------- Utils ----------
+  // ---------- Utils / macros / normalize ----------
+  function splitToLines(txt){ return String(txt||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean); }
   function fmt(v){ return (Math.round((+v||0)*100)/100).toString(); }
-  function trimFloat(v){ const n=+v; return Number.isInteger(n)? n : n.toFixed(2).replace(/\.00$/,''); }
-  function clamp(n,min,max){ return Math.max(min, Math.min(max,n)); }
+  function trim(n){ const x=+n; return Number.isInteger(x) ? x : x.toFixed(2).replace(/\.00$/,''); }
+  function clamp(n,min,max){ return Math.max(min,Math.min(max,n)); }
   function round2(n){ return Math.round(n*100)/100; }
-  function safeName(s){ return (s||'').toLowerCase().replace(/[^a-z0-9-_]+/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,''); }
-  function num(n){ const x=+n; return Number.isFinite(x) ? (Number.isInteger(x)? x : x.toFixed(2).replace(/\.00$/,'')) : 0; }
-  function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+  function num(n){ const x=+n; return Number.isFinite(x)?(Number.isInteger(x)?x:x.toFixed(2).replace(/\.00$/,'')):0; }
+  function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+  function escJson(s){ return String(s??'').replace(/\\/g,'\\\\').replace(/"/g,'\\"'); }
+  function safeName(s){ return (s||'').toLowerCase().replace(/[^a-z0-9_-]+/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,''); }
+  function svgEl(n){ return document.createElementNS('http://www.w3.org/2000/svg', n); }
+
+  function containsMacro(s){ return /\$\([A-Za-z0-9_]+\)/.test(String(s||'')); }
+  function rayHasMacros(ray){
+    const lines = [
+      ...(ray.commands||[]),
+      ...(ray.entity_checks||[]).flatMap(e=>[e.selector||'', e.cmd||'']),
+      ...(ray.block_checks||[]).map(b=>b.cmd||'')
+    ].join('\n');
+    return containsMacro(lines);
+  }
+  function buildMacroObjectFromRay(ray){
+    const names = new Set();
+    const scan = s => String(s||'').replace(/\$\(([A-Za-z0-9_]+)\)/g,(_,n)=>{ names.add(n); return ''; });
+    (ray.commands||[]).forEach(scan);
+    (ray.entity_checks||[]).forEach(e=>{ scan(e.selector); scan(e.cmd); });
+    (ray.block_checks||[]).forEach(b=>{ scan(b.cmd); });
+    return `{${Array.from(names).map(n=>`${n}:$(${n})`).join(',')}}`;
+  }
+
+  function normPoint(p){ return { commands:(p.commands||[]).map(String), offset:{ x:+p.offset?.x||0, y:+p.offset?.y||0, z:+p.offset?.z||0 } }; }
+  function normRay(r){
+    return {
+      name: r.name||'Ray',
+      step: +r.step||0.5,
+      max_distance: Math.max(1, +r.max_distance||50),
+      commands: (r.commands||[]).map(String),
+      block_checks: Array.isArray(r.block_checks)? r.block_checks.map(b=>({ id:b.id||'#air', cmd:(b.cmd||'').toString(), pass:!!b.pass, invert:!!b.invert })) : [],
+      entity_checks: Array.isArray(r.entity_checks)? r.entity_checks.map(e=>({ selector:(e.selector||'@e[distance=..0.6]').toString(), cmd:(e.cmd||'').toString(), pass:!!e.pass, invert:!!e.invert })) : [],
+      collapsed: !!r.collapsed,
+      enabled: r.enabled!==false
+    };
+  }
+
+  // ---------- First render ----------
+  drawGrid(); renderPoints(); renderEditor(); renderRays();
+
 })();

@@ -2,139 +2,108 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <title>Spellcasting — Pack Generator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Spellcast Datapack Generator</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <link href="styles.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body>
-  <div class="app">
-    <aside>
-      <div class="brand">
-        <div class="logo">🔮</div>
-        <div>
-          <h1>Spellcast Datapack Generator</h1>
-          <div class="muted" style="font-size:12px">XY offset grid + path & raycasting</div>
-        </div>
+  <header class="bar">
+    <div class="brand">Spellcasting Pack Generator</div>
+    <div class="actions">
+      <label class="muted">Import JSON <input type="file" id="importJson" accept="application/json"></label>
+      <button id="exportJson" class="btn">Export JSON</button>
+      <button id="exportZip" class="btn primary">Download ZIP</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2>Pack Info</h2>
+      <div class="form grid2">
+        <label>Spell Name
+          <input id="spellName" placeholder="leviosa" />
+        </label>
+        <label>Author
+          <input id="author" placeholder="YourName" />
+        </label>
+        <label>Spell Delay (ticks)
+          <input id="spellDelay" type="number" min="0" step="1" value="50" />
+        </label>
       </div>
 
-      <div class="field">
-        <label>Spell name</label>
-        <input id="spellName" type="text" placeholder="e.g. incendio" />
-      </div>
-
-      <div class="field">
-        <label>Spell Settings</label>
-        <div class="settings">
-          <div class="setting">
-            <span class="setting-label">Delay</span>
-            <input id="spellDelay" type="number" min="0" step="1" value="50" />
-          </div>
-          <div class="setting">
-            <span class="setting-label">After-complete (loaded_spell)</span>
-            <input id="loadedSpell" type="text" value="incendio" />
-          </div>
-        </div>
-      </div>
-
-      <div class="section-title">
-        <h2>Points</h2>
-        <button class="btn small" id="addPointBtn">+ Add Point</button>
-      </div>
-
-      <div id="pointsList" class="points-list"></div>
-
-      <div class="actions">
-        <button id="exportZip" class="btn primary">⬇ Download .zip</button>
-        <button id="exportJson" class="btn">⤓ Export JSON</button>
-        <label class="btn ghost" for="importJson">⤒ Import JSON</label>
-        <input id="importJson" type="file" accept="application/json" style="display:none" />
-      </div>
-
-      <div style="margin-top:14px" class="muted" id="status"></div>
-    </aside>
-
-    <main>
-      <div class="section-title">
-        <h2>Editor</h2>
-        <span class="pill" id="selectedLabel">Point 0</span>
-      </div>
-
-      <div class="grid">
-        <div class="card">
-          <div class="field">
-            <label>Offset (x, y, z)</label>
-            <div class="offsets">
-              <input id="offsetX" type="number" step="any" inputmode="decimal" placeholder="x">
-              <input id="offsetY" type="number" step="any" inputmode="decimal" placeholder="y">
-              <input id="offsetZ" type="number" step="any" inputmode="decimal" placeholder="z">
-              <button class="btn small" id="resetOffset">Reset</button>
-            </div>
-            <div class="offset-grid-wrap">
-              <div id="gridCanvas" class="grid-canvas" aria-label="6 by 6 XY grid">
-                <div class="grid-cross-v"></div>
-                <div class="grid-cross-h"></div>
-                <div id="gridThumb" class="grid-thumb" title="Drag to set X/Y"></div>
-              </div>
-              <div class="muted tiny">Drag/click to set X (→) and Y (↑). 6×6 cells, origin at crosshair. Z is separate.</div>
-            </div>
-          </div>
-
-          <div class="field">
-            <label>Commands for this point</label>
-          </div>
-          <div id="commands"></div>
-          <div class="footer">
-            <button class="btn" id="addCmdBtn">+ Add Command</button>
-            <button class="btn" id="clearPointBtn">Clear Point</button>
-            <button class="btn danger" id="deletePointBtn">Delete Point</button>
+      <h3>Points</h3>
+      <div class="points">
+        <div class="points-list">
+          <div id="pointsList"></div>
+          <div class="row gap">
+            <button id="addPointBtn" class="btn">+ Add Point</button>
+            <button id="deletePointBtn" class="btn danger">Delete Point</button>
+            <button id="clearPointBtn" class="btn">Clear Commands</button>
           </div>
         </div>
 
-        <div class="card">
-          <div class="section-title">
-            <h2>Live Preview</h2>
-            <div class="actions">
-              <button class="btn small" id="copyPreview">Copy file</button>
+        <div class="point-editor">
+          <div class="editor-head">
+            <div id="selectedLabel" class="title">Point 0</div>
+            <div class="row gap">
+              <label>X <input id="offsetX" type="number" step="any" /></label>
+              <label>Y <input id="offsetY" type="number" step="any" /></label>
+              <label>Z <input id="offsetZ" type="number" step="any" /></label>
+              <button id="resetOffset" class="btn">Reset</button>
             </div>
           </div>
-          <div id="preview" class="preview"></div>
 
-          <div class="section-title" style="margin-top:18px">
-            <h2>Path Preview (All Points)</h2>
-          </div>
-          <div class="offset-grid-wrap">
-            <div id="overviewCanvas" class="grid-canvas" aria-label="All points XY path">
-              <div class="grid-cross-v"></div>
-              <div class="grid-cross-h"></div>
-              <svg id="overviewSvg" width="180" height="180" viewBox="0 0 180 180" class="overlay-svg"></svg>
+          <div class="grid-wrap">
+            <div class="grid-title">XY Grid (3×3, center = 0,0)</div>
+            <div class="gridBox">
+              <canvas id="gridCanvas" width="180" height="180"></canvas>
+              <div id="gridThumb"></div>
             </div>
-            <div class="muted tiny">All points in order on X/Y. Lines connect steps; circles have the point index.</div>
           </div>
 
-          <div class="section-title" style="margin-top:18px">
-            <h2>After-cast Function (activate/<span id="loadedSpellLabel">incendio</span>.mcfunction)</h2>
-          </div>
-          <div class="field">
-            <textarea id="afterFunction" rows="6" spellcheck="false" placeholder="$say Spell finished!
-$particle flame ~ ~ ~ 0 0 0 0.01 50"></textarea>
+          <div class="commands-wrap">
+            <div class="row between">
+              <h4>Point Commands</h4>
+              <button id="addCmdBtn" class="btn">+ Add Command</button>
+            </div>
+            <div id="commands"></div>
           </div>
 
-          <!-- Raycasting UI -->
-          <div class="section-title" style="margin-top:18px">
-            <h2>Raycasting</h2>
-            <button class="btn small success" id="addRayBtn">+ ADD Raycast</button>
+          <div class="preview">
+            <h4>Selected Point Preview</h4>
+            <pre id="preview"></pre>
           </div>
-          <div id="raysContainer" class="rays"></div>
-
         </div>
       </div>
-    </main>
-  </div>
+    </section>
+
+    <section class="panel">
+      <h2>Finish (After-Cast) Function</h2>
+      <p class="muted small">These run <em>after</em> the pattern completes, followed by any raycasts you add.</p>
+      <textarea id="afterFunction" class="code" placeholder="# one command per line
+say Finished!
+$execute as @s run say Uses macros like $(UUID) if you need"></textarea>
+
+      <h2>Raycasts</h2>
+      <div class="row gap">
+        <button id="addRayBtn" class="btn">+ Add Raycast</button>
+      </div>
+      <div id="raysContainer" class="stack"></div>
+
+      <div class="overview">
+        <h3>Path Overview</h3>
+        <svg id="overviewSvg" viewBox="0 0 180 180" width="180" height="180" class="overviewSvg"></svg>
+      </div>
+
+      <div id="status" class="status"></div>
+    </section>
+  </main>
+
+  <footer class="foot muted small">
+    Spellcasting © You — ships with Leviosa. Build more spells at your leisure.
+  </footer>
 
   <script src="script.js"></script>
 </body>
